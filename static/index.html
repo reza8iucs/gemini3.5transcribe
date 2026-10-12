@@ -92,7 +92,14 @@
     width: 100%; max-width: 1580px; margin: 0 auto; padding: 14px 16px 24px;
   }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
-  .stream { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .workspace { flex: 1; min-height: 0; display: flex; gap: 20px; }
+  .stream { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .translations { flex: 0 0 36%; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .translations[hidden] { display: none; }
+  .translations .scroll { padding: 22px 24px 26px; gap: 20px; }
+  .translations .segment { padding: 20px 22px 24px; }
+  .translations .transcript { font-size: 25px; line-height: 1.5; }
+  .badge.lang { background: #10263a; color: #7cc4ff; border-color: #1c4466; }
   .stream-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 16px 18px; border-bottom: 1px solid var(--line); }
   .stream-head h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .28em; display: flex; align-items: center; gap: 14px; }
   .stream-head h2 svg { width: 18px; height: 18px; color: var(--green); }
@@ -160,6 +167,10 @@
   @keyframes pulse { 50% { opacity: .35; } }
   @keyframes blink { 50% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  @media (max-width: 1000px) {
+    .workspace { flex-direction: column; }
+    .translations { flex: 0 0 38%; }
+  }
   @media (max-width: 760px) {
     .scroll { padding: 16px; gap: 18px; }
     .transcript { font-size: 24px; }
@@ -196,6 +207,7 @@
 </header>
 
 <main>
+  <div class="workspace">
   <section class="panel stream">
     <div class="stream-head">
       <h2>
@@ -226,7 +238,7 @@
           <svg viewBox="0 0 24 24"><path d="M12 3v18M7 8v8M17 8v8M2 11v2M22 11v2"/></svg>
           Live Stream (Interim)
         </div>
-        <div class="transcript"><span id="interimText"></span><span class="cursor"></span></div>
+        <div class="transcript" dir="auto"><span id="interimText"></span><span class="cursor"></span></div>
       </div>
     </div>
 
@@ -235,6 +247,20 @@
       <span>Model: <span id="footModel">…</span></span>
     </div>
   </section>
+
+  <aside class="panel translations" id="translations" hidden>
+    <div class="stream-head">
+      <h2>
+        <svg viewBox="0 0 24 24"><path d="M4 5h8M8 3v2M5 9c1.5 3 4 5 6 6M11 5c-.5 4-3 8-7 10"/><path d="M13 20l4-9 4 9M14.5 17h5"/></svg>
+        English Translation
+      </h2>
+    </div>
+    <div class="scroll" id="translationScroll"></div>
+    <div class="stream-foot">
+      <span><i class="on"></i><span>Non-English speech only</span></span>
+    </div>
+  </aside>
+  </div>
 
   <section class="panel controls">
     <button class="primary" id="toggle"><span class="stop-glyph" id="toggleGlyph" hidden></span><span id="toggleText">Start Session</span></button>
@@ -337,6 +363,20 @@ try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '
 let state = 'idle';
 let segments = [];
 let interim = '';
+// English text streamed for the speech not yet committed as a segment; empty while English is spoken.
+let live = { translation: '', language: '', time: 0 };
+// Finished translation cards. They follow the translation stream's own pauses rather than
+// the transcript's segments, because the translation trails the transcript by a moment.
+let translations = [];
+let liveTimer = null;
+const LIVE_PAUSE_MS = 2500;
+const LIVE_MAX_CHARS = 280;
+// Whether the server's live translation session is running.
+let translatorActive = false;
+const languageNames = new Intl.DisplayNames(['en'], { type: 'language' });
+function languageName(code) {
+  try { return code ? languageNames.of(code) : ''; } catch { return ''; }
+}
 let lastFinalAt = 0;
 let muted = false;
 let ws = null;
@@ -383,36 +423,99 @@ function highlight(el, text, query) {
   el.append(text.slice(from));
 }
 
+function isPinned(scroll) {
+  return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 80;
+}
+
+function segmentMeta(segment) {
+  const meta = document.createElement('div');
+  meta.className = 'segment-meta';
+  meta.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+  const time = document.createElement('span');
+  time.textContent = new Date(segment.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  meta.append(time);
+  return meta;
+}
+
+function copyButton(getText, title) {
+  const copy = document.createElement('button');
+  copy.className = 'icon-btn';
+  copy.title = title;
+  copy.setAttribute('aria-label', title);
+  copy.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>';
+  copy.onclick = () => navigator.clipboard.writeText(getText());
+  return copy;
+}
+
+function matches(segment, query) {
+  return !query || segment.text.toLowerCase().includes(query);
+}
+
+// Live-session cards plus, when that session is unavailable, per-segment text translations.
+function translationEntries() {
+  return [...translations, ...segments.filter((s) => s.translation)].sort((a, b) => a.time - b.time);
+}
+
+function renderTranslations(query) {
+  const entries = translationEntries();
+  $('translations').hidden = entries.length === 0 && !live.translation;
+  const scroll = $('translationScroll');
+  const pinned = isPinned(scroll);
+  scroll.textContent = '';
+  for (const entry of entries) {
+    if (query && !entry.translation.toLowerCase().includes(query)) continue;
+    const card = document.createElement('article');
+    card.className = 'segment';
+    const meta = segmentMeta(entry);
+    const badge = document.createElement('span');
+    badge.className = 'badge lang';
+    badge.textContent = `${entry.language || 'Unknown'} → English`;
+    meta.append(badge, copyButton(() => entry.translation, 'Copy translation'));
+    const body = document.createElement('div');
+    body.className = 'transcript';
+    highlight(body, entry.translation, query);
+    card.append(meta, body);
+    scroll.append(card);
+  }
+  if (live.translation) {
+    const block = document.createElement('div');
+    block.className = 'interim';
+    const label = document.createElement('div');
+    label.className = 'interim-label';
+    label.textContent = `Live Translation · ${live.language || 'Unknown'} → English`;
+    const body = document.createElement('div');
+    body.className = 'transcript';
+    body.textContent = live.translation;
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    body.append(cursor);
+    block.append(label, body);
+    scroll.append(block);
+  }
+  if (pinned) scroll.scrollTop = scroll.scrollHeight;
+}
+
 function render() {
   const query = $('search').value.trim().toLowerCase();
   const scroll = $('scroll');
-  const pinned = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 80;
+  const pinned = isPinned(scroll);
 
   const list = $('segments');
   list.textContent = '';
   for (const segment of segments) {
-    if (query && !segment.text.toLowerCase().includes(query)) continue;
+    if (!matches(segment, query)) continue;
     const card = document.createElement('article');
     card.className = 'segment';
 
-    const meta = document.createElement('div');
-    meta.className = 'segment-meta';
-    meta.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
-    const time = document.createElement('span');
-    time.textContent = new Date(segment.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const meta = segmentMeta(segment);
     const badge = document.createElement('span');
     badge.className = segment.final ? 'badge' : 'badge partial';
     badge.textContent = segment.final ? 'Final' : 'Partial';
-    const copy = document.createElement('button');
-    copy.className = 'icon-btn';
-    copy.title = 'Copy segment';
-    copy.setAttribute('aria-label', 'Copy segment');
-    copy.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>';
-    copy.onclick = () => navigator.clipboard.writeText(segment.text);
-    meta.append(time, badge, copy);
+    meta.append(badge, copyButton(() => segment.text, 'Copy segment'));
 
     const body = document.createElement('div');
     body.className = 'transcript';
+    body.dir = 'auto';
     highlight(body, segment.text, query);
 
     card.append(meta, body);
@@ -427,6 +530,61 @@ function render() {
   $('counts').textContent = `${segments.length} segment${segments.length === 1 ? '' : 's'} · ${words} word${words === 1 ? '' : 's'}`;
 
   if (pinned) scroll.scrollTop = scroll.scrollHeight;
+  renderTranslations(query);
+}
+
+// Translates a segment once it has stopped growing; English segments come back empty.
+async function requestTranslation(text) {
+  const response = await fetch('/api/translate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok) throw new Error(response.statusText);
+  return response.json();
+}
+
+function commitLive() {
+  clearTimeout(liveTimer);
+  const translation = live.translation.trim();
+  if (translation) translations.push({ time: live.time, language: live.language, translation });
+  live = { translation: '', language: '', time: 0 };
+}
+
+function addLiveTranslation(text, language) {
+  const name = languageName(language);
+  if (live.translation && name && live.language && name !== live.language) commitLive();
+  if (!live.translation) live.time = Date.now();
+  live.translation += text;
+  live.language = name || live.language;
+  // A card closes at a sentence end once it is long enough, or when the speaker pauses.
+  if (live.translation.length > LIVE_MAX_CHARS && /[.!?]\s*$/.test(live.translation)) commitLive();
+  clearTimeout(liveTimer);
+  if (live.translation) liveTimer = setTimeout(() => { commitLive(); render(); }, LIVE_PAUSE_MS);
+}
+
+// Text translation of a finished segment, used only when the live translation
+// session is unavailable. Retried if the request fails (usually the per-minute quota).
+const RETRY_DELAYS_MS = [20000, 40000, 60000];
+function scheduleTranslation(segment, attempt = 0) {
+  clearTimeout(segment.timer);
+  // The live session translates from the audio and only the non-English speech,
+  // whereas the segment text may mix in English spoken at the same time.
+  if (translatorActive) return;
+  segment.timer = setTimeout(async () => {
+    const text = segment.text;
+    try {
+      const result = await requestTranslation(text);
+      if (segment.text !== text || !segments.includes(segment)) return;
+      segment.language = result.language;
+      segment.translation = result.is_english ? '' : result.translation;
+      render();
+    } catch {
+      if (segment.text === text && attempt < RETRY_DELAYS_MS.length) {
+        segment.timer = setTimeout(() => scheduleTranslation(segment, attempt + 1), RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }, attempt ? 0 : MERGE_WINDOW_MS + 100);
 }
 
 function commitFinal(text) {
@@ -438,6 +596,7 @@ function commitFinal(text) {
   } else {
     segments.push({ time: now, text: text.trim(), final: true });
   }
+  scheduleTranslation(segments[segments.length - 1]);
   lastFinalAt = now;
   interim = '';
   render();
@@ -455,6 +614,11 @@ function onServerMessage(event) {
   } else if (msg.type === 'final') {
     setFoot('Received inputTranscription.text', true);
     commitFinal(msg.text);
+  } else if (msg.type === 'translation') {
+    addLiveTranslation(msg.text, msg.language);
+    render();
+  } else if (msg.type === 'translator') {
+    translatorActive = msg.active;
   } else if (msg.type === 'renew') {
     ws.renew = true;
   } else if (msg.type === 'error') {
@@ -570,8 +734,11 @@ function endSession() {
   if (socket && socket.readyState <= WebSocket.OPEN) socket.close();
   if (interim) {
     segments.push({ time: Date.now(), text: interim.trim(), final: false });
+    scheduleTranslation(segments[segments.length - 1]);
     interim = '';
   }
+  commitLive();
+  translatorActive = false;
   setState('idle');
   setFoot('Idle');
   render();
@@ -584,13 +751,21 @@ function tick() {
 
 // Export
 function stamp(time) { return new Date(time).toLocaleTimeString('en-US'); }
+// Transcript segments and translation cards interleaved in the order they happened.
+function timeline() {
+  return [
+    ...segments.map((s) => ({ time: s.time, text: s.text, english: false })),
+    ...translationEntries().map((t) => ({ time: t.time, text: t.translation, english: true, language: t.language })),
+  ].sort((a, b) => a.time - b.time);
+}
 const exporters = {
-  txt: () => [segments.map((s) => `[${stamp(s.time)}] ${s.text}`).join('\n\n'), 'text/plain'],
-  md: () => [`# Transcript\n\n_${new Date().toLocaleString()} · ${$('footModel').textContent}_\n\n` + segments.map((s) => `**${stamp(s.time)}**\n\n${s.text}`).join('\n\n'), 'text/markdown'],
+  txt: () => [timeline().map((e) => `[${stamp(e.time)}] ${e.english ? `[${e.language || 'Unknown'} → English] ` : ''}${e.text}`).join('\n\n'), 'text/plain'],
+  md: () => [`# Transcript\n\n_${new Date().toLocaleString()} · ${$('footModel').textContent}_\n\n` + timeline().map((e) => (e.english ? `> **${stamp(e.time)} · ${e.language || 'Unknown'} → English**\n>\n> ${e.text}` : `**${stamp(e.time)}**\n\n${e.text}`)).join('\n\n'), 'text/markdown'],
   json: () => [JSON.stringify({
     model: $('footModel').textContent,
     exportedAt: new Date().toISOString(),
     segments: segments.map((s) => ({ time: new Date(s.time).toISOString(), final: s.final, text: s.text })),
+    translations: translationEntries().map((t) => ({ time: new Date(t.time).toISOString(), language: t.language || null, text: t.translation })),
   }, null, 2), 'application/json'],
 };
 function exportAs(kind) {
@@ -657,6 +832,8 @@ $('clear').onclick = () => {
   if (segments.length && !confirm('Clear the whole transcript?')) return;
   segments = [];
   interim = '';
+  commitLive();
+  translations = [];
   render();
 };
 document.querySelectorAll('[data-export]').forEach((button) => { button.onclick = () => exportAs(button.dataset.export); });
