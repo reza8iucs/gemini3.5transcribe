@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gemini Live Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #070808;
+    --panel: #0b0c0c;
+    --card: #0d0e0e;
+    --line: #1f2222;
+    --line-strong: #2b2f2f;
+    --chip: #151717;
+    --text: #e8e6e1;
+    --muted: #7f8583;
+    --dim: #565b59;
+    --green: #4ade9c;
+    --green-dim: #123524;
+    --red: #e5332a;
+    --red-dim: #3a0f0d;
+    --amber: #e6b54a;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    display: flex;
+    flex-direction: column;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+  button { cursor: pointer; text-transform: uppercase; }
+  svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  /* Header */
+  header {
+    display: flex; align-items: center; gap: 28px; flex-wrap: wrap;
+    padding: 14px max(16px, calc((100% - 1640px) / 2));
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 18px; margin-right: auto; }
+  .brand-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--dim); }
+  body[data-state="recording"] .brand-dot { background: var(--red); box-shadow: 0 0 12px var(--red); }
+  .brand h1 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .32em; }
+  .brand p { margin: 4px 0 0; color: var(--muted); font-size: 11px; max-width: 280px; line-height: 1.6; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--chip); border: 1px solid var(--line-strong); border-radius: 4px;
+    padding: 8px 12px; font-size: 11px; font-weight: 500; min-height: 34px;
+  }
+  .label { color: var(--muted); }
+  .model { display: flex; align-items: center; gap: 12px; }
+  .vocab { max-width: 300px; }
+  .vocab svg { color: var(--amber); }
+  .vocab span:last-child { text-transform: none; letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 12px;
+    border: 1px solid var(--line-strong); border-radius: 999px;
+    padding: 8px 22px; font-size: 11px; color: var(--muted); min-height: 34px;
+  }
+  .status-pill i { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); }
+  body[data-state="recording"] .status-pill { background: var(--red-dim); border-color: #6b1a16; color: #ff6b61; }
+  body[data-state="recording"] .status-pill i { background: var(--red); animation: pulse 1.2s infinite; }
+  body[data-state="connecting"] .status-pill i, body[data-state="finalizing"] .status-pill i { background: var(--amber); animation: pulse .8s infinite; }
+  .gain svg { color: var(--green); }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 64px; height: 3px; border-radius: 2px; background: var(--line-strong); outline-offset: 6px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 9px; height: 9px; border-radius: 50%; background: var(--text); }
+  input[type=range]::-moz-range-thumb { width: 9px; height: 9px; border: 0; border-radius: 50%; background: var(--text); }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+    background: var(--chip); border: 1px solid var(--line-strong); border-radius: 4px;
+    padding: 8px 14px; font-size: 12px; font-weight: 700; min-height: 34px;
+  }
+  .btn:hover { border-color: #4a5050; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.danger { color: #f0554c; background: transparent; border-color: var(--line); }
+
+  /* Layout */
+  main {
+    flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 30px;
+    width: 100%; max-width: 1580px; margin: 0 auto; padding: 14px 16px 24px;
+  }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .stream { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .stream-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .stream-head h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .28em; display: flex; align-items: center; gap: 14px; }
+  .stream-head h2 svg { width: 18px; height: 18px; color: var(--green); }
+  .counts { padding: 5px 10px; min-height: 0; font-size: 10px; color: var(--muted); margin-right: auto; }
+  .search { display: flex; align-items: center; gap: 10px; width: 224px; padding: 0 12px; color: var(--muted); }
+  .search input { background: none; border: 0; outline: 0; width: 100%; text-transform: none; letter-spacing: .02em; color: var(--text); padding: 8px 0; }
+  .search:focus-within { border-color: #4a5050; }
+
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 40px 26px; display: flex; flex-direction: column; gap: 30px; scrollbar-color: #2e3232 transparent; }
+  .segment { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 26px 26px 30px; }
+  .segment-meta { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; margin-bottom: 18px; }
+  .badge { background: var(--green-dim); color: var(--green); border: 1px solid #1c4d35; border-radius: 3px; padding: 3px 8px; font-size: 9px; font-weight: 700; letter-spacing: .2em; }
+  .badge.partial { background: #33290f; color: var(--amber); border-color: #57451a; }
+  .icon-btn { margin-left: auto; background: none; border: 0; padding: 4px; color: var(--muted); }
+  .icon-btn:hover { color: var(--text); }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .transcript {
+    font-family: var(--serif); font-size: 31px; line-height: 1.58; letter-spacing: 0;
+    text-transform: none; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  mark { background: #5a4a12; color: #ffe9a8; border-radius: 2px; }
+  .interim {
+    border-left: 2px solid var(--green); padding: 28px 30px 34px;
+    background: linear-gradient(90deg, #0a1410, transparent 55%);
+  }
+  .interim-label { display: flex; align-items: center; gap: 10px; color: var(--green); font-size: 11px; font-weight: 700; letter-spacing: .28em; margin-bottom: 14px; }
+  .interim .transcript { font-size: 37px; line-height: 1.35; color: #fff; }
+  .cursor { display: inline-block; width: 5px; height: .95em; margin-left: 8px; vertical-align: -0.12em; background: var(--green); border-radius: 2px; animation: blink 1s steps(2) infinite; }
+  .empty { margin: auto; text-align: center; color: var(--dim); line-height: 2.2; font-size: 11px; }
+  .empty b { display: block; font-family: var(--serif); font-weight: 400; font-size: 34px; letter-spacing: 0; text-transform: none; color: var(--muted); }
+  .notice { margin: 0 0 4px; padding: 12px 16px; border: 1px solid #6b1a16; background: var(--red-dim); color: #ff8d85; border-radius: 6px; text-transform: none; letter-spacing: .02em; line-height: 1.6; overflow-wrap: anywhere; }
+
+  .stream-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; letter-spacing: .2em; }
+  .stream-foot > span:last-child { white-space: nowrap; }
+  .stream-foot span:first-child { display: flex; align-items: center; gap: 10px; }
+  .stream-foot i { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+  .stream-foot i.on { background: var(--green); }
+
+  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 26px; }
+  .primary { background: var(--text); color: #0a0a0a; border: 0; border-radius: 4px; padding: 0 24px; height: 46px; font-size: 13px; font-weight: 700; letter-spacing: .2em; display: inline-flex; align-items: center; gap: 12px; }
+  .primary:disabled { opacity: .5; cursor: default; }
+  body[data-state="recording"] .primary { background: var(--red); color: #fff; box-shadow: 0 0 24px rgba(229, 51, 42, .35); }
+  .stop-glyph { width: 13px; height: 13px; border-radius: 2px; background: currentColor; }
+  .mic { width: 46px; height: 46px; padding: 0; }
+  .mic svg { width: 18px; height: 18px; }
+  .mic.muted { color: #f0554c; border-color: #6b1a16; }
+  .timer { color: var(--green); font-size: 13px; height: 36px; }
+  .timer i { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); }
+  body[data-state="recording"] .timer i { background: var(--green); }
+  .export { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .export .label { font-size: 10px; letter-spacing: .24em; margin-right: 6px; }
+  .export .btn { height: 38px; padding: 0 20px; font-size: 13px; }
+
+  /* Setup dialog */
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line-strong); border-radius: 12px; padding: 0; width: min(560px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(0, 0, 0, .7); }
+  dialog form { padding: 24px; display: flex; flex-direction: column; gap: 18px; }
+  dialog h3 { margin: 0; font-size: 13px; letter-spacing: .28em; }
+  dialog label { display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: 10px; letter-spacing: .2em; }
+  dialog textarea, dialog select { background: var(--chip); border: 1px solid var(--line-strong); border-radius: 4px; padding: 10px 12px; color: var(--text); text-transform: none; letter-spacing: .02em; font-size: 13px; }
+  dialog textarea { min-height: 96px; resize: vertical; }
+  dialog small { text-transform: none; letter-spacing: .02em; color: var(--dim); line-height: 1.6; }
+  dialog .row { display: flex; justify-content: flex-end; gap: 10px; }
+
+  @keyframes pulse { 50% { opacity: .35; } }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  @media (max-width: 760px) {
+    .scroll { padding: 16px; gap: 18px; }
+    .transcript { font-size: 24px; }
+    .interim .transcript { font-size: 28px; }
+    .export { margin-left: 0; }
+    main { gap: 16px; }
+  }
+</style>
+</head>
+<body data-state="idle">
+
+<header>
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <div>
+      <h1>Gemini Live Studio</h1>
+      <p>Realtime speech transcription engine</p>
+    </div>
+  </div>
+  <div class="model"><span class="label">Model:</span><span class="chip" id="modelChip">…</span></div>
+  <span class="status-pill"><i></i><span id="pillText">Standby</span></span>
+  <button class="chip vocab" id="vocabChip" title="Edit custom vocabulary">
+    <svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
+    <span class="label">Vocab:</span><span id="vocabText">None</span>
+  </button>
+  <label class="chip gain" title="Microphone input gain">
+    <svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 010 7"/><path d="M18.5 5.5a9 9 0 010 13"/></svg>
+    <input type="range" id="gain" min="0" max="2" step="0.05" value="1" aria-label="Microphone input gain">
+  </label>
+  <button class="btn" id="setupBtn">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>
+    Setup
+  </button>
+</header>
+
+<main>
+  <section class="panel stream">
+    <div class="stream-head">
+      <h2>
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><path d="M8 8h8M8 12h6"/></svg>
+        Transcription Stream
+      </h2>
+      <span class="chip counts" id="counts">0 segments · 0 words</span>
+      <label class="chip search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="search" type="search" placeholder="Search transcript..." aria-label="Search transcript">
+      </label>
+      <button class="btn" id="copyAll">
+        <svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
+        <span>Copy</span>
+      </button>
+      <button class="btn danger" id="clear">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5"/></svg>
+        Clear
+      </button>
+    </div>
+
+    <div class="scroll" id="scroll">
+      <div class="notice" id="notice" hidden></div>
+      <div class="empty" id="empty"><b>Nothing transcribed yet.</b>Press Start Session and begin speaking</div>
+      <div id="segments" style="display: contents"></div>
+      <div class="interim" id="interim" hidden>
+        <div class="interim-label">
+          <svg viewBox="0 0 24 24"><path d="M12 3v18M7 8v8M17 8v8M2 11v2M22 11v2"/></svg>
+          Live Stream (Interim)
+        </div>
+        <div class="transcript"><span id="interimText"></span><span class="cursor"></span></div>
+      </div>
+    </div>
+
+    <div class="stream-foot">
+      <span><i id="footDot"></i><span id="footText">Idle</span></span>
+      <span>Model: <span id="footModel">…</span></span>
+    </div>
+  </section>
+
+  <section class="panel controls">
+    <button class="primary" id="toggle"><span class="stop-glyph" id="toggleGlyph" hidden></span><span id="toggleText">Start Session</span></button>
+    <button class="btn mic" id="mic" title="Mute microphone" aria-label="Mute microphone" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>
+    </button>
+    <span class="chip timer"><i></i><span id="timer">00:00</span></span>
+    <div class="export">
+      <span class="label">Export:</span>
+      <button class="btn" data-export="txt">
+        <svg viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M4 20h16"/></svg>
+        TXT
+      </button>
+      <button class="btn" data-export="md">MD</button>
+      <button class="btn" data-export="json">JSON</button>
+    </div>
+  </section>
+</main>
+
+<dialog id="setup">
+  <form method="dialog">
+    <h3>Setup</h3>
+    <label>Custom vocabulary
+      <textarea id="vocabInput" placeholder="Thorsten, Schaeff, thorwebdev"></textarea>
+      <small>Comma or newline separated names, brands and terms to bias recognition toward.</small>
+    </label>
+    <label>Language
+      <select id="language">
+        <option value="">Automatic detection</option>
+        <option value="en-US">English (United States)</option>
+        <option value="en-GB">English (Great Britain)</option>
+        <option value="en-IN">English (India)</option>
+        <option value="fr-FR">French</option>
+        <option value="de-DE">German</option>
+        <option value="es-US">Spanish (United States)</option>
+        <option value="es-419">Spanish (Latin America)</option>
+        <option value="pt-BR">Portuguese (Brazil)</option>
+        <option value="it-IT">Italian</option>
+        <option value="nl-NL">Dutch</option>
+        <option value="fa-IR">Farsi</option>
+        <option value="hi-IN">Hindi</option>
+        <option value="ja-JP">Japanese</option>
+        <option value="ko-KR">Korean</option>
+        <option value="cmn-Hans-CN">Mandarin Chinese (Simplified)</option>
+      </select>
+    </label>
+    <label>Transcription mode
+      <select id="mode">
+        <option value="VERBATIM">Verbatim — exactly what was said</option>
+        <option value="SMART">Smart — remove fillers, format text</option>
+      </select>
+    </label>
+    <label>Microphone
+      <select id="device"><option value="">System default</option></select>
+    </label>
+    <small>Changes apply to the next session.</small>
+    <div class="row">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn" value="save" id="saveSetup">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const WORKLET = `
+class PcmCapture extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    // ~100ms of audio per chunk
+    this.buffer = new Int16Array(Math.round(sampleRate / 10));
+    this.filled = 0;
+  }
+  process(inputs) {
+    const channel = inputs[0][0];
+    if (channel) {
+      for (let i = 0; i < channel.length; i++) {
+        const s = Math.max(-1, Math.min(1, channel[i]));
+        this.buffer[this.filled++] = s < 0 ? s * 32768 : s * 32767;
+        if (this.filled === this.buffer.length) {
+          this.port.postMessage(this.buffer.buffer.slice(0));
+          this.filled = 0;
+        }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-capture', PcmCapture);
+`;
+
+// Finals arriving this close together belong to the same spoken segment.
+const MERGE_WINDOW_MS = 700;
+const SETTINGS_KEY = 'gemini-live-studio:settings';
+
+let settings = { vocabulary: [], language: '', mode: 'VERBATIM', deviceId: '' };
+try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch {}
+
+let state = 'idle';
+let segments = [];
+let interim = '';
+let lastFinalAt = 0;
+let muted = false;
+let ws = null;
+let audio = null;
+let startedAt = 0;
+let timerId = null;
+let quickCloses = 0;
+
+function setState(next) {
+  state = next;
+  document.body.dataset.state = next;
+  $('pillText').textContent = { idle: 'Standby', connecting: 'Connecting', recording: 'Live Recording', finalizing: 'Finalizing' }[next];
+  $('toggleText').textContent = next === 'idle' ? 'Start Session' : next === 'finalizing' ? 'Finalizing…' : 'Stop Session';
+  $('toggleGlyph').hidden = next === 'idle';
+  $('toggle').disabled = next === 'finalizing';
+}
+
+function setFoot(text, on = false) {
+  $('footText').textContent = text;
+  $('footDot').classList.toggle('on', on);
+}
+
+function showNotice(message) {
+  $('notice').textContent = message || '';
+  $('notice').hidden = !message;
+}
+
+function wordCount(text) {
+  return (text.trim().match(/\S+/g) || []).length;
+}
+
+function highlight(el, text, query) {
+  el.textContent = '';
+  if (!query) { el.textContent = text; return; }
+  const lower = text.toLowerCase();
+  let from = 0, at;
+  while ((at = lower.indexOf(query, from)) !== -1) {
+    el.append(text.slice(from, at));
+    const mark = document.createElement('mark');
+    mark.textContent = text.slice(at, at + query.length);
+    el.append(mark);
+    from = at + query.length;
+  }
+  el.append(text.slice(from));
+}
+
+function render() {
+  const query = $('search').value.trim().toLowerCase();
+  const scroll = $('scroll');
+  const pinned = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 80;
+
+  const list = $('segments');
+  list.textContent = '';
+  for (const segment of segments) {
+    if (query && !segment.text.toLowerCase().includes(query)) continue;
+    const card = document.createElement('article');
+    card.className = 'segment';
+
+    const meta = document.createElement('div');
+    meta.className = 'segment-meta';
+    meta.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+    const time = document.createElement('span');
+    time.textContent = new Date(segment.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const badge = document.createElement('span');
+    badge.className = segment.final ? 'badge' : 'badge partial';
+    badge.textContent = segment.final ? 'Final' : 'Partial';
+    const copy = document.createElement('button');
+    copy.className = 'icon-btn';
+    copy.title = 'Copy segment';
+    copy.setAttribute('aria-label', 'Copy segment');
+    copy.innerHTML = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>';
+    copy.onclick = () => navigator.clipboard.writeText(segment.text);
+    meta.append(time, badge, copy);
+
+    const body = document.createElement('div');
+    body.className = 'transcript';
+    highlight(body, segment.text, query);
+
+    card.append(meta, body);
+    list.append(card);
+  }
+
+  $('interim').hidden = !interim;
+  $('interimText').textContent = interim;
+  $('empty').hidden = segments.length > 0 || !!interim;
+
+  const words = segments.reduce((n, s) => n + wordCount(s.text), 0);
+  $('counts').textContent = `${segments.length} segment${segments.length === 1 ? '' : 's'} · ${words} word${words === 1 ? '' : 's'}`;
+
+  if (pinned) scroll.scrollTop = scroll.scrollHeight;
+}
+
+function commitFinal(text) {
+  const now = Date.now();
+  const last = segments[segments.length - 1];
+  if (last && last.final && now - lastFinalAt < MERGE_WINDOW_MS) {
+    const joiner = /\s$/.test(last.text) || /^[\s.,!?;:]/.test(text) ? '' : ' ';
+    last.text += joiner + text;
+  } else {
+    segments.push({ time: now, text: text.trim(), final: true });
+  }
+  lastFinalAt = now;
+  interim = '';
+  render();
+}
+
+function onServerMessage(event) {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'ready') {
+    if (state === 'connecting') setState('recording');
+    setFoot('Listening', true);
+  } else if (msg.type === 'interim') {
+    interim = msg.text;
+    setFoot('Receiving interimInputTranscription.text', true);
+    render();
+  } else if (msg.type === 'final') {
+    setFoot('Received inputTranscription.text', true);
+    commitFinal(msg.text);
+  } else if (msg.type === 'renew') {
+    ws.renew = true;
+  } else if (msg.type === 'error') {
+    ws.failed = true;
+    showNotice(msg.message);
+    endSession();
+  }
+}
+
+function openSocket() {
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  const openedAt = Date.now();
+  socket.binaryType = 'arraybuffer';
+  socket.onopen = () => socket.send(JSON.stringify({
+    type: 'start',
+    vocabulary: settings.vocabulary,
+    language: settings.language,
+    mode: settings.mode,
+    sampleRate: audio.context.sampleRate,
+  }));
+  socket.onmessage = onServerMessage;
+  socket.onclose = () => {
+    if (socket !== ws) return;
+    if (state === 'finalizing' || socket.failed) { endSession(); return; }
+    if (state === 'idle') return;
+    // The Live session hit its time limit or dropped: reconnect, keep the mic running.
+    quickCloses = !socket.renew && Date.now() - openedAt < 5000 ? quickCloses + 1 : 0;
+    if (quickCloses >= 3) {
+      showNotice('The connection to the transcription server keeps closing. Check that the server is still running.');
+      endSession();
+      return;
+    }
+    setFoot('Reconnecting…');
+    setTimeout(() => { if (state !== 'idle' && state !== 'finalizing') ws = openSocket(); }, 300);
+  };
+  return socket;
+}
+
+async function startAudio() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      deviceId: settings.deviceId ? { exact: settings.deviceId } : undefined,
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+    },
+  });
+  const context = new AudioContext({ sampleRate: 16000 });
+  const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+  await context.audioWorklet.addModule(url);
+  URL.revokeObjectURL(url);
+
+  const source = context.createMediaStreamSource(stream);
+  const gain = context.createGain();
+  gain.gain.value = Number($('gain').value);
+  const capture = new AudioWorkletNode(context, 'pcm-capture');
+  // Keeps the graph pulling without playing the mic back.
+  const sink = context.createGain();
+  sink.gain.value = 0;
+  source.connect(gain).connect(capture).connect(sink).connect(context.destination);
+
+  capture.port.onmessage = (event) => {
+    if (!muted && state === 'recording' && ws && ws.readyState === WebSocket.OPEN) ws.send(event.data);
+  };
+  return { stream, context, gain };
+}
+
+function stopAudio() {
+  if (!audio) return;
+  audio.stream.getTracks().forEach((track) => track.stop());
+  audio.context.close();
+  audio = null;
+}
+
+async function startSession() {
+  showNotice('');
+  setState('connecting');
+  setFoot('Requesting microphone…');
+  try {
+    audio = await startAudio();
+  } catch (error) {
+    showNotice(`Could not open the microphone: ${error.message}`);
+    setState('idle');
+    setFoot('Idle');
+    return;
+  }
+  loadDevices();
+  quickCloses = 0;
+  setFoot('Connecting…');
+  ws = openSocket();
+  startedAt = Date.now();
+  timerId = setInterval(tick, 500);
+  tick();
+}
+
+function stopSession() {
+  stopAudio();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    // The server flushes the last final transcript, then closes the socket.
+    setState('finalizing');
+    setFoot('Finalizing transcript…', true);
+    ws.send(JSON.stringify({ type: 'stop' }));
+  } else {
+    endSession();
+  }
+}
+
+function endSession() {
+  stopAudio();
+  clearInterval(timerId);
+  const socket = ws;
+  ws = null;
+  if (socket && socket.readyState <= WebSocket.OPEN) socket.close();
+  if (interim) {
+    segments.push({ time: Date.now(), text: interim.trim(), final: false });
+    interim = '';
+  }
+  setState('idle');
+  setFoot('Idle');
+  render();
+}
+
+function tick() {
+  const seconds = Math.floor((Date.now() - startedAt) / 1000);
+  $('timer').textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+// Export
+function stamp(time) { return new Date(time).toLocaleTimeString('en-US'); }
+const exporters = {
+  txt: () => [segments.map((s) => `[${stamp(s.time)}] ${s.text}`).join('\n\n'), 'text/plain'],
+  md: () => [`# Transcript\n\n_${new Date().toLocaleString()} · ${$('footModel').textContent}_\n\n` + segments.map((s) => `**${stamp(s.time)}**\n\n${s.text}`).join('\n\n'), 'text/markdown'],
+  json: () => [JSON.stringify({
+    model: $('footModel').textContent,
+    exportedAt: new Date().toISOString(),
+    segments: segments.map((s) => ({ time: new Date(s.time).toISOString(), final: s.final, text: s.text })),
+  }, null, 2), 'application/json'],
+};
+function exportAs(kind) {
+  const [content, type] = exporters[kind]();
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([content], { type }));
+  link.download = `transcript-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${kind}`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+// Setup
+function renderVocab() {
+  $('vocabText').textContent = settings.vocabulary.length ? settings.vocabulary.join(', ') : 'None';
+}
+async function loadDevices() {
+  try {
+    const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.deviceId);
+    const select = $('device');
+    select.length = 1;
+    for (const input of inputs) select.add(new Option(input.label || 'Microphone', input.deviceId));
+    select.value = settings.deviceId;
+    if (select.selectedIndex < 0) select.value = '';
+  } catch {}
+}
+function openSetup() {
+  $('vocabInput').value = settings.vocabulary.join(', ');
+  $('language').value = settings.language;
+  $('mode').value = settings.mode;
+  loadDevices();
+  $('setup').showModal();
+}
+$('setup').addEventListener('close', () => {
+  if ($('setup').returnValue !== 'save') return;
+  settings = {
+    vocabulary: $('vocabInput').value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean),
+    language: $('language').value,
+    mode: $('mode').value,
+    deviceId: $('device').value,
+  };
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
+  renderVocab();
+});
+
+// Wiring
+$('toggle').onclick = () => (state === 'idle' ? startSession() : stopSession());
+$('mic').onclick = () => {
+  muted = !muted;
+  $('mic').classList.toggle('muted', muted);
+  $('mic').setAttribute('aria-pressed', muted);
+  $('mic').title = muted ? 'Unmute microphone' : 'Mute microphone';
+};
+$('gain').oninput = () => { if (audio) audio.gain.gain.value = Number($('gain').value); };
+$('search').oninput = render;
+$('setupBtn').onclick = openSetup;
+$('vocabChip').onclick = openSetup;
+$('copyAll').onclick = async () => {
+  await navigator.clipboard.writeText(segments.map((s) => s.text).join('\n\n'));
+  const label = $('copyAll').querySelector('span');
+  label.textContent = 'Copied';
+  setTimeout(() => { label.textContent = 'Copy'; }, 1200);
+};
+$('clear').onclick = () => {
+  if (segments.length && !confirm('Clear the whole transcript?')) return;
+  segments = [];
+  interim = '';
+  render();
+};
+document.querySelectorAll('[data-export]').forEach((button) => { button.onclick = () => exportAs(button.dataset.export); });
+
+fetch('/api/config').then((r) => r.json()).then((config) => {
+  $('modelChip').textContent = config.model;
+  $('footModel').textContent = config.model;
+  if (!config.hasKey) showNotice('GEMINI_API_KEY is not set. Add it to a .env file next to app.py and restart the server.');
+});
+
+renderVocab();
+render();
+</script>
+</body>
+</html>
