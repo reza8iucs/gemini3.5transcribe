@@ -24,3 +24,12 @@ Open http://127.0.0.1:8000 and press **Start Session**.
 - Automatic reconnect at the 10-minute session limit
 
 See `.env.example` for the model and port overrides.
+
+## Tests
+
+```bash
+uv run --with-requirements requirements-dev.txt pytest
+```
+
+The tests replace the Gemini sessions with scripted fakes, so they need no API
+key and use no quota. They also run on GitHub for every push.

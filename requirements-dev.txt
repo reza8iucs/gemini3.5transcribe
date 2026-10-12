@@ -1,0 +1,7 @@
+# Everything needed to run the tests: the app's own dependencies plus the test tools.
+google-genai
+fastapi
+uvicorn[standard]
+python-dotenv
+pytest
+httpx
