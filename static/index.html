@@ -694,8 +694,9 @@ function stopAudio() {
   audio = null;
 }
 
-// Once a day, on the first session start, the glossary terms are pulled in as the
-// default custom vocabulary. Terms added by hand in Setup are kept after them.
+// Once a day the glossary terms are pulled in as the default custom vocabulary:
+// when the page opens, so Setup shows them, and again at session start in case
+// that failed. Terms added by hand in Setup are kept after them.
 async function refreshGlossary() {
   const today = new Date().toDateString();
   try { if (localStorage.getItem(GLOSSARY_KEY) === today) return; } catch {}
@@ -873,6 +874,7 @@ fetch('/api/config').then((r) => r.json()).then((config) => {
 
 renderVocab();
 render();
+refreshGlossary();
 </script>
 </body>
 </html>

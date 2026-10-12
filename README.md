@@ -20,8 +20,8 @@ Open http://127.0.0.1:8000 and press **Start Session**.
 - Live English translation of non-English speech in a side panel
   (`gemini-3.5-live-translate-preview`), silent while English is spoken
 - Custom vocabulary, language hint, verbatim or smart mode (Setup)
-- Custom vocabulary defaults to a Supabase glossary, fetched on the first
-  session start of each day (needs `SUPABASE_URL` and `SUPABASE_KEY` in `.env`)
+- Custom vocabulary defaults to a Supabase glossary, fetched once a day when the page opens
+  (needs `SUPABASE_URL` and `SUPABASE_KEY` in `.env`)
 - Search, copy, and export to TXT / MD / JSON
 - Automatic reconnect at the 10-minute session limit
 
