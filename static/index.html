@@ -334,6 +334,13 @@
     <label>Microphone
       <select id="device"><option value="">System default</option></select>
     </label>
+    <label>Audio source
+      <select id="source">
+        <option value="mic">Microphone only</option>
+        <option value="both">Microphone and computer audio</option>
+      </select>
+      <small>Computer audio is what plays through your speakers or headphones. The browser asks what to share at the start of each session: pick a screen or tab and turn on its share-audio switch.</small>
+    </label>
     <small>Changes apply to the next session.</small>
     <div class="row">
       <button class="btn" value="cancel">Cancel</button>
@@ -378,7 +385,7 @@ const GLOSSARY_KEY = 'gemini-live-studio:glossary-date';
 
 // Languages the speech is expected to be in; they improve accuracy without ruling others out.
 const DEFAULT_LANGUAGES = ['en-US', 'en-CA', 'fr-CA'];
-let settings = { vocabulary: [], languages: [...DEFAULT_LANGUAGES], mode: 'VERBATIM', deviceId: '' };
+let settings = { vocabulary: [], languages: [...DEFAULT_LANGUAGES], mode: 'VERBATIM', deviceId: '', source: 'mic' };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch {}
 if (!Array.isArray(settings.languages)) settings.languages = [...DEFAULT_LANGUAGES];
 delete settings.language;
@@ -708,15 +715,44 @@ function openSocket() {
   return socket;
 }
 
-async function startAudio() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      deviceId: settings.deviceId ? { exact: settings.deviceId } : undefined,
-      channelCount: 1,
-      echoCancellation: true,
-      noiseSuppression: true,
-    },
+// What the computer is playing, taken from the browser's screen-share picker.
+// Sound cards often cancel speaker sound out of the microphone themselves, so
+// the microphone alone cannot be relied on to hear it.
+async function captureComputerAudio() {
+  const shared = await navigator.mediaDevices.getDisplayMedia({
+    video: true,
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    systemAudio: 'include',
   });
+  shared.getVideoTracks().forEach((track) => track.stop());
+  if (!shared.getAudioTracks().length) {
+    throw new Error('nothing was shared with audio. Start again and turn on the share-audio switch in the picker.');
+  }
+  shared.getAudioTracks()[0].onended = () => {
+    if (state !== 'idle') showNotice('Computer audio sharing stopped. Only the microphone is being transcribed.');
+  };
+  return shared;
+}
+
+async function startAudio() {
+  // Asked for first: the picker only opens straight after a click.
+  const shared = settings.source === 'both' ? await captureComputerAudio() : null;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: settings.deviceId ? { exact: settings.deviceId } : undefined,
+        channelCount: 1,
+        // Off unless the computer's audio is captured directly, so the
+        // microphone can pick up what the speakers play.
+        echoCancellation: !!shared,
+        noiseSuppression: !!shared,
+      },
+    });
+  } catch (error) {
+    shared?.getTracks().forEach((track) => track.stop());
+    throw error;
+  }
   const context = new AudioContext({ sampleRate: 16000 });
   const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
   await context.audioWorklet.addModule(url);
@@ -725,21 +761,24 @@ async function startAudio() {
   const source = context.createMediaStreamSource(stream);
   const gain = context.createGain();
   gain.gain.value = Number($('gain').value);
-  const capture = new AudioWorkletNode(context, 'pcm-capture');
+  // Mono input, so stereo computer audio is mixed down rather than losing a channel.
+  const capture = new AudioWorkletNode(context, 'pcm-capture', { channelCount: 1, channelCountMode: 'explicit' });
   // Keeps the graph pulling without playing the mic back.
   const sink = context.createGain();
   sink.gain.value = 0;
   source.connect(gain).connect(capture).connect(sink).connect(context.destination);
+  if (shared) context.createMediaStreamSource(shared).connect(capture);
 
   capture.port.onmessage = (event) => {
     if (!muted && state === 'recording' && ws && ws.readyState === WebSocket.OPEN) ws.send(event.data);
   };
-  return { stream, context, gain };
+  return { stream, shared, context, gain };
 }
 
 function stopAudio() {
   if (!audio) return;
   audio.stream.getTracks().forEach((track) => track.stop());
+  audio.shared?.getTracks().forEach((track) => track.stop());
   audio.context.close();
   audio = null;
 }
@@ -772,11 +811,11 @@ async function refreshGlossary() {
 async function startSession() {
   showNotice('');
   setState('connecting');
-  setFoot('Requesting microphone…');
+  setFoot(settings.source === 'both' ? 'Requesting computer audio and microphone…' : 'Requesting microphone…');
   try {
     audio = await startAudio();
   } catch (error) {
-    showNotice(`Could not open the microphone: ${error.message}`);
+    showNotice(`Could not open the audio: ${error.message}`);
     setState('idle');
     setFoot('Idle');
     return;
@@ -924,6 +963,7 @@ function openSetup() {
   $('languageInput').value = '';
   renderLanguageChips();
   $('mode').value = settings.mode;
+  $('source').value = settings.source === 'both' ? 'both' : 'mic';
   loadDevices();
   $('setup').showModal();
 }
@@ -934,6 +974,7 @@ $('setup').addEventListener('close', () => {
     languages: draftLanguages,
     mode: $('mode').value,
     deviceId: $('device').value,
+    source: $('source').value,
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
   renderVocab();
