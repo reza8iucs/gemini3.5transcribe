@@ -232,3 +232,42 @@ def test_translate_endpoint_rejects_other_sites_and_missing_key(install, monkeyp
     assert blocked.status_code == 403
     monkeypatch.setattr(studio, "client", None)
     assert http.post("/api/translate", json={"text": "Bonjour"}).status_code == 503
+
+
+# Glossary vocabulary
+
+
+def test_glossary_returns_terms_and_aliases_once_each(monkeypatch):
+    async def rows():
+        return [
+            {"term": "QuickBooks", "aliases": ["QuickBooks", "QB"]},
+            {"term": "DEXT", "aliases": ["DEXT", "Dext", " "]},
+            {"term": "Chico", "aliases": None},
+        ]
+
+    monkeypatch.setattr(studio, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(studio, "SUPABASE_KEY", "test-key")
+    monkeypatch.setattr(studio, "fetch_glossary_rows", rows)
+    assert http.get("/api/glossary").json() == {
+        "scope": studio.GLOSSARY_SCOPE,
+        "terms": ["QuickBooks", "QB", "DEXT", "Chico"],
+    }
+
+
+def test_glossary_reports_when_it_is_not_configured_or_unreachable(monkeypatch):
+    monkeypatch.setattr(studio, "SUPABASE_KEY", None)
+    assert http.get("/api/glossary").status_code == 503
+
+    async def unreachable():
+        raise studio.httpx.ConnectError("no route")
+
+    monkeypatch.setattr(studio, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(studio, "SUPABASE_KEY", "test-key")
+    monkeypatch.setattr(studio, "fetch_glossary_rows", unreachable)
+    assert http.get("/api/glossary").status_code == 502
+
+
+def test_glossary_rejects_other_sites(monkeypatch):
+    monkeypatch.setattr(studio, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(studio, "SUPABASE_KEY", "test-key")
+    assert http.get("/api/glossary", headers={"origin": "https://evil.example"}).status_code == 403

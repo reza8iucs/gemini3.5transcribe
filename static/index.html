@@ -356,6 +356,7 @@ registerProcessor('pcm-capture', PcmCapture);
 // Finals arriving this close together belong to the same spoken segment.
 const MERGE_WINDOW_MS = 700;
 const SETTINGS_KEY = 'gemini-live-studio:settings';
+const GLOSSARY_KEY = 'gemini-live-studio:glossary-date';
 
 let settings = { vocabulary: [], language: '', mode: 'VERBATIM', deviceId: '' };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch {}
@@ -693,6 +694,29 @@ function stopAudio() {
   audio = null;
 }
 
+// Once a day, on the first session start, the glossary terms are pulled in as the
+// default custom vocabulary. Terms added by hand in Setup are kept after them.
+async function refreshGlossary() {
+  const today = new Date().toDateString();
+  try { if (localStorage.getItem(GLOSSARY_KEY) === today) return; } catch {}
+  try {
+    const response = await fetch('/api/glossary', { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return;
+    const { terms } = await response.json();
+    if (!terms.length) return;
+    const seen = new Set();
+    settings.vocabulary = [...terms, ...settings.vocabulary].filter((term) => {
+      const key = term.toLowerCase();
+      return !seen.has(key) && seen.add(key);
+    });
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      localStorage.setItem(GLOSSARY_KEY, today);
+    } catch {}
+    renderVocab();
+  } catch {}
+}
+
 async function startSession() {
   showNotice('');
   setState('connecting');
@@ -707,6 +731,9 @@ async function startSession() {
   }
   loadDevices();
   quickCloses = 0;
+  setFoot('Loading glossary…');
+  await refreshGlossary();
+  if (state !== 'connecting') return;
   setFoot('Connecting…');
   ws = openSocket();
   startedAt = Date.now();

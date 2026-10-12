@@ -2,6 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = [
 #     "google-genai",
+#     "httpx",
 #     "fastapi",
 #     "uvicorn[standard]",
 #     "python-dotenv",
@@ -34,6 +35,7 @@ import traceback
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket
@@ -57,6 +59,12 @@ LIVE_TRANSLATE_MODEL = os.environ.get(
 )
 # Text model that gives each finished non-English segment a polished translation.
 TRANSLATE_MODEL = os.environ.get("GEMINI_TRANSLATE_MODEL", "models/gemini-3.5-flash-lite")
+
+# Supabase table whose terms become the default custom vocabulary.
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+GLOSSARY_TABLE = os.environ.get("GLOSSARY_TABLE", "pv_glossary")
+GLOSSARY_SCOPE = os.environ.get("GLOSSARY_SCOPE", "Chico")
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8000"))
@@ -168,6 +176,33 @@ def is_echo(output, own_input, transcript, tagged_english):
         heard = set(own_words)
         return sum(word in heard for word in words) / len(words) >= 0.6
     return False
+
+
+def glossary_terms(rows):
+    "Each glossary row's term and aliases as one list, without repeats"
+    terms = {}
+    for row in rows:
+        for term in [row.get("term"), *(row.get("aliases") or [])]:
+            term = (term or "").strip()
+            if term:
+                terms.setdefault(term.lower(), term)
+    return list(terms.values())
+
+
+async def fetch_glossary_rows():
+    async with httpx.AsyncClient(timeout=10) as http:
+        response = await http.get(
+            f"{SUPABASE_URL}/rest/v1/{GLOSSARY_TABLE}",
+            params={
+                "select": "term,aliases",
+                # Rows whose scope array contains the scope
+                "scope": f"cs.{{{GLOSSARY_SCOPE}}}",
+                "order": "term",
+            },
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        )
+    response.raise_for_status()
+    return response.json()
 
 
 def same_origin(headers):
@@ -387,6 +422,19 @@ async def index():
 @app.get("/api/config")
 async def get_config():
     return {"model": MODEL.removeprefix("models/"), "hasKey": client is not None}
+
+
+@app.get("/api/glossary")
+async def glossary(request: Request):
+    if not same_origin(request.headers):
+        raise HTTPException(403)
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        raise HTTPException(503, "SUPABASE_URL and SUPABASE_KEY are not set")
+    try:
+        rows = await fetch_glossary_rows()
+    except httpx.HTTPError as error:
+        raise HTTPException(502, f"Could not read the glossary: {error}")
+    return {"scope": GLOSSARY_SCOPE, "terms": glossary_terms(rows)}
 
 
 @app.post("/api/translate")

@@ -20,6 +20,8 @@ Open http://127.0.0.1:8000 and press **Start Session**.
 - Live English translation of non-English speech in a side panel
   (`gemini-3.5-live-translate-preview`), silent while English is spoken
 - Custom vocabulary, language hint, verbatim or smart mode (Setup)
+- Custom vocabulary defaults to a Supabase glossary, fetched on the first
+  session start of each day (needs `SUPABASE_URL` and `SUPABASE_KEY` in `.env`)
 - Search, copy, and export to TXT / MD / JSON
 - Automatic reconnect at the 10-minute session limit
 
@@ -64,10 +66,12 @@ key and use no quota. They also run on GitHub for every push.
 | Live translation | English speech produces no translation, both when the model stays silent and when it repeats the English back. |
 | Live translation | Translation resumes when a non-English speaker follows an English one. |
 | Live translation | If the translation session fails, transcription carries on. |
+| Glossary vocabulary | Each term and its aliases are returned once; a missing configuration or unreachable glossary is reported; other sites are refused. |
 | Text translation fallback | The transcript is sent to the model, empty text skips the model, long text is capped, quota errors are passed on, and other sites or a missing key are refused. |
 
 ### What is not covered
 
-- The page itself: how cards are grouped, search, copy and export.
+- The page itself: how cards are grouped, search, copy and export, and the
+  once-a-day timing of the glossary fetch.
 - The real Gemini models and a real microphone. The fakes replay scripted
   messages, so a change in how the models behave will not be caught here.
