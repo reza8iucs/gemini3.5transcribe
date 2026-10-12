@@ -153,29 +153,114 @@ def _pairs(words):
     return set(zip(words, words[1:]))
 
 
-def is_echo(output, own_input, transcript, tagged_english):
+def is_echo(output, heard, tagged_english):
     """True when the 'translation' just repeats English that was spoken.
 
-    own_input is the translation session's own transcript of what it heard,
-    transcript is what the transcription session heard.
+    heard is the translation session's own transcript of what it heard.
     """
     words = _words(output)
     if not words:
         return True
-    own_words = _words(" ".join(own_input))
+    heard_words = _words(" ".join(heard))
     # The same word sequence turning up in what was said is a repeat. Matching on
     # word pairs keeps a real translation from tripping over common words.
     pairs = _pairs(words)
-    if pairs:
-        heard_pairs = _pairs(own_words) | _pairs(_words(" ".join(transcript)))
-        if len(pairs & heard_pairs) / len(pairs) >= 0.6:
-            return True
+    if pairs and len(pairs & _pairs(heard_words)) / len(pairs) >= 0.6:
+        return True
     # The language tag alone is unreliable when languages switch quickly, so it
     # only counts together with the words matching what the session heard.
     if tagged_english:
-        heard = set(own_words)
+        heard = set(heard_words)
         return sum(word in heard for word in words) / len(words) >= 0.6
     return False
+
+
+# Everyday English words that other languages rarely use. Enough of them in a
+# row means English is being spoken. Words that other languages share or borrow
+# ("a", "on", "no", "okay") are left out so they cannot tip the balance.
+ENGLISH_WORDS = frozenset(
+    """
+    the and is are was were be been am it its this that these those there here
+    he she we they you your our their his her them us my mine yours
+    of to in for with from at by about into over under after before between
+    if so but because when where what which who why how than then
+    do does did done have has had having will would can could should shall may might must
+    not don doesn didn isn aren wasn weren won wouldn couldn shouldn
+    well just also only very really still again too
+    all any some most more much many each every both other another same such
+    one two three four five seven eight nine ten first next last
+    get got go going gone make made take took say said see know think want need
+    like look use work give call tell ask put keep let try pay
+    out up down off back now today week month year time day
+    """.split()
+)
+
+
+class SpokenLanguage:
+    """Whether English is being spoken right now, judged from the transcript.
+
+    The translation model sometimes keeps going after the speaker returns to
+    English: it repeats the English, rewords it, or even reports hearing the
+    other language. Its own account of what it heard cannot be trusted then,
+    so the transcription session's text is the referee.
+    """
+
+    # The transcript only says something about speech it has just heard.
+    FRESH_SECONDS = 5
+    # Translation chunks this close together are read as one phrase.
+    PHRASE_SECONDS = 3
+
+    def __init__(self):
+        self.english = False
+        self.final = ""
+        self.final_at = None
+        self.interim = ""
+        self.heard_at = None
+        self.last_output = []
+        self.last_output_at = None
+
+    def heard(self, now, interim=None, final=None):
+        "Records what the transcription session heard"
+        if self.heard_at is not None and now - self.heard_at > self.FRESH_SECONDS:
+            # After a silence the next speaker starts with a clean slate.
+            self.english = False
+        self.heard_at = now
+        if final is not None:
+            self.final, self.final_at, self.interim = final, now, ""
+        else:
+            self.interim = interim
+
+        # Read the segment word by word. Two everyday English words among the last
+        # four mean English; hardly any among the last six mean another language;
+        # anything in between keeps the last clear answer.
+        words = [w in ENGLISH_WORDS for w in _words(self.interim or self.final) if len(w) > 1]
+        for end in range(3, len(words) + 1):
+            last_four, last_six = words[max(0, end - 4) : end], words[max(0, end - 6) : end]
+            if sum(last_four) / len(last_four) >= 0.5:
+                self.english = True
+            elif sum(last_six) / len(last_six) < 0.2:
+                self.english = False
+
+    def is_english(self, output, now):
+        "True when a translation chunk arriving now belongs to English speech"
+        words = _words(output)
+        phrase = words
+        if self.last_output_at is not None and now - self.last_output_at <= self.PHRASE_SECONDS:
+            phrase = self.last_output + words
+        self.last_output, self.last_output_at = words, now
+
+        if self.heard_at is None or now - self.heard_at > self.FRESH_SECONDS:
+            return False
+
+        # English speech comes back as roughly the words that were said, while a
+        # translation shares next to nothing with speech in another language.
+        recent = self.interim
+        if self.final_at is not None and now - self.final_at <= self.PHRASE_SECONDS:
+            recent = f"{self.final} {recent}"
+        recent = set(_words(recent)[-15:])
+        if phrase and sum(w in recent for w in phrase) / len(phrase) >= 0.5:
+            return True
+        return self.english
 
 
 def glossary_terms(rows):
@@ -227,9 +312,8 @@ class AudioLoop:
         self.final_after_stop = False
         self.last_message_at = 0.0
 
-        # What the transcription session heard lately, in the original language.
-        self.interim_text = ""
-        self.recent_finals = collections.deque(maxlen=3)
+        # Follows the transcription session to tell when English is being spoken.
+        self.spoken = SpokenLanguage()
 
     async def notify(self, kind, **payload):
         try:
@@ -286,7 +370,7 @@ class AudioLoop:
                 # Speculative partial hypothesis, replaced as the speaker talks
                 interim = server_content.interim_input_transcription
                 if interim and interim.text:
-                    self.interim_text = interim.text
+                    self.spoken.heard(loop.time(), interim=interim.text)
                     await self.notify("interim", text=interim.text)
 
                 # Authoritative transcript of a finished speech segment
@@ -294,8 +378,7 @@ class AudioLoop:
                 if final and final.text:
                     if self.stopping:
                         self.final_after_stop = True
-                    self.recent_finals.append(final.text)
-                    self.interim_text = ""
+                    self.spoken.heard(loop.time(), final=final.text)
                     await self.notify("final", text=final.text)
 
     async def send_translate(self, session):
@@ -334,12 +417,12 @@ class AudioLoop:
                                 output = server_content.output_transcription
                                 if output and output.text:
                                     # Only non-English speech is translated. With several
-                                    # languages in the room the model sometimes repeats the
-                                    # English back, so drop output that matches what was said.
-                                    if is_echo(
+                                    # languages in the room the model sometimes carries on
+                                    # through English, so drop output while English is being
+                                    # spoken and output that matches what was said.
+                                    if self.spoken.is_english(output.text, loop.time()) or is_echo(
                                         output.text,
                                         recent_input,
-                                        [*self.recent_finals, self.interim_text],
                                         (language or "").lower().startswith("en"),
                                     ):
                                         continue

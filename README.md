@@ -71,6 +71,9 @@ access. Press **Stop Session** when you are done. Stop the server with Ctrl+C.
 - Only non-English speech is translated. When English and another language are
   spoken at the same time, the panel follows the non-English speaker and goes
   quiet when they stop.
+- Translation stops on its own when the speaker goes back to English. The
+  translation model sometimes carries on through English, so the server checks
+  each piece against the transcript and drops it while English is being spoken.
 - Each translation card is labelled with the detected language, for example
   "French → English".
 - If the translation session cannot start, transcription carries on without it.
@@ -193,7 +196,7 @@ remembered by the browser.
 |---|---|
 | `app.py` | The server: audio relay, translation filter, glossary and translation endpoints. |
 | `static/index.html` | The whole page: layout, styling and browser logic. |
-| `tests/` | The test suite. |
+| `tests/` | The test suite, with recorded sessions in `tests/recordings/`. |
 | `.env.example` | Template for `.env`. |
 | `requirements-dev.txt` | Dependencies for running the tests. |
 
@@ -203,8 +206,9 @@ remembered by the browser.
 uv run --with-requirements requirements-dev.txt pytest
 ```
 
-The tests replace the Gemini sessions with scripted fakes, so they need no API
-key and use no quota. They also run on GitHub for every push.
+The tests replace the Gemini sessions with scripted fakes and recordings of
+real sessions, so they need no API key and use no quota. They also run on
+GitHub for every push.
 
 ### What is covered
 
@@ -215,6 +219,9 @@ key and use no quota. They also run on GitHub for every push.
 | English-echo filter | A real translation is kept even when it shares common words ("to", "you", "tomorrow") with English spoken nearby. |
 | English-echo filter | English that the translation model repeats back is dropped, including the phrases from a real mixed-language session. |
 | English-echo filter | The model's "this was English" tag is not enough on its own to drop a translation, because that tag is unreliable when languages switch quickly. |
+| Spoken language | While the transcript reads as English, translation is dropped even when the model rewords what was said; French, German and Spanish transcripts let it through, including right after English in the same sentence. |
+| Spoken language | English stays in force through a stretch with few everyday words, and ends when the transcript clearly changes language. |
+| Spoken language | A transcript that has gone silent has no say, and the next speaker is not assumed to be English. |
 | Session setup | With no options, language is detected automatically and text is returned. |
 | Session setup | Vocabulary, language hints and Smart mode from Setup are applied; blank terms are removed, unknown modes ignored, vocabulary capped at 1,000 terms. |
 | Translation setup | The live translation targets English and is configured to stay silent for English speech. |
@@ -234,10 +241,32 @@ key and use no quota. They also run on GitHub for every push.
 | Security | Another website cannot open a session and spend the API key. |
 | Live translation | Non-English speech is translated and labelled with its language. |
 | Live translation | English speech produces no translation, both when the model stays silent and when it repeats the English back. |
+| Live translation | English that the model reports as French and rewords is dropped when the transcript shows English. |
 | Live translation | Translation resumes when a non-English speaker follows an English one. |
 | Live translation | If the translation session fails, transcription carries on. |
 | Glossary vocabulary | Each term and its aliases are returned once; a missing configuration or unreachable glossary is reported; other sites are refused. |
 | Text translation fallback | The transcript is sent to the model, empty text skips the model, long text is capped, quota errors are passed on, and other sites or a missing key are refused. |
+
+**Recorded sessions** (`tests/test_recordings.py`) — real sessions replayed through the translation filter:
+
+Each file in `tests/recordings/` holds everything the two Gemini sessions sent
+back for a real clip, with timings, and marks where English and where another
+language was spoken. The five recordings there are of the same one-minute
+meeting clip (English, French, English); the model behaved differently each
+time, which is why there are several.
+
+| Area | What the tests check |
+|---|---|
+| English stretches | Nothing is shown as a translation while English is spoken, whether the model stays quiet, repeats the English, tags it as French, or hears it as French and rewords it. |
+| Other languages | Every piece of the French translation is shown, with no gaps. |
+
+To turn another clip into a test, record it and then fill in `about` and
+`expect` in the file it writes (this one does need the API key):
+
+```bash
+afconvert -f WAVE -d LEI16@16000 -c 1 recording.mp4 clip.wav
+uv run --with-requirements requirements-dev.txt tests/record_session.py clip.wav tests/recordings/name.json
+```
 
 ### What is not covered
 

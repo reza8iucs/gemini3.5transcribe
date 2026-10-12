@@ -168,6 +168,24 @@ def test_english_speech_produces_no_translation(install):
     assert of_type(run_session(), "translation") == []
 
 
+def test_reworded_english_is_dropped_when_the_transcript_is_english(install):
+    install(
+        transcribe=FakeSession([message(interim="Okay, so the column CE, it's agreement on the current invoices")]),
+        translate=FakeSession(
+            [
+                message(source=None, language="fr"),
+                message(source=None, language="fr"),
+                # The model reports French and rewords what was said in English.
+                message(source=" quand même si", language="fr"),
+                message(output=" So even if"),
+                message(source=" on dit", language="fr"),
+                message(output=" we say"),
+            ]
+        ),
+    )
+    assert of_type(run_session(), "translation") == []
+
+
 def test_translation_resumes_after_english(install):
     install(
         translate=FakeSession(
