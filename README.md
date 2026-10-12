@@ -47,7 +47,7 @@ access. Press **Stop Session** when you are done. Stop the server with Ctrl+C.
 |---|---|
 | Transcription Stream | The live transcript. The green-edged block is the interim text, still changing as you speak; cards marked **Final** are finished segments. |
 | English Translation | Appears on the right when a language other than English is spoken. Stays hidden while everything is English. |
-| Vocab chip / Setup | Opens Setup: custom vocabulary, language hints, transcription mode and microphone. Changes apply to the next session. |
+| Vocab chip / Setup | Opens Setup: custom vocabulary, language hints, transcription mode, microphone and audio source. Changes apply to the next session. |
 | Slider in the header | Microphone input gain. |
 | Microphone button | Mutes and unmutes without ending the session. |
 | Search | Filters both panels and highlights matches. |
@@ -119,6 +119,20 @@ everything in the project. Keep it in `.env` only.
 Without those two settings the app works normally and the vocabulary is
 whatever you enter in Setup.
 
+### Computer audio
+
+By default only the microphone is transcribed. To also transcribe what the
+computer plays, such as the other side of a call, set **Setup → Audio source**
+to **Microphone and computer audio**.
+
+- At the start of each session the browser asks what to share. Pick a screen
+  or a tab and turn on its share-audio switch. Only the audio is used.
+- It works with headphones, because the sound is taken before it reaches them.
+- Sharing system audio needs Chrome or Edge. On Windows, sharing the entire
+  screen captures everything the computer plays; a tab captures that tab only.
+- Speakers alone are not enough: many sound cards cancel speaker sound out of
+  the microphone before the browser receives it.
+
 ### Language hints
 
 **Setup → Language hints** lists the languages you expect to hear, as BCP-47
@@ -149,13 +163,13 @@ All settings live in `.env` next to `app.py`. Only `GEMINI_API_KEY` is required.
 | `HOST` | `127.0.0.1` | Address the server listens on. |
 | `PORT` | `8000` | Port the server listens on. |
 
-Vocabulary, language hints, mode and microphone are chosen in Setup and
+Vocabulary, language hints, mode, microphone and audio source are chosen in Setup and
 remembered by the browser.
 
 ## Privacy and security
 
 - **Audio leaves your machine.** Everything the microphone picks up during a
-  session is sent to Google's Gemini API for transcription and translation.
+  session, and the computer audio you share, is sent to Google's Gemini API for transcription and translation.
   Tell the people you are recording.
 - **Transcripts are not stored.** They exist only in the open browser tab and
   are gone when you reload or clear, unless you export them.
@@ -186,7 +200,8 @@ remembered by the browser.
 | `address already in use` when starting | Another copy of the app is still running. Press Ctrl+C in its terminal, or set a different `PORT`. |
 | "GEMINI_API_KEY is not set" | Add the key to `.env` and restart the server. |
 | A model is "not found" | Your key does not have that model. Set `GEMINI_MODEL` or `GEMINI_LIVE_TRANSLATE_MODEL` to one it does. |
-| "Could not open the microphone" | Allow microphone access for the page in the browser, and check the device chosen in Setup. |
+| "Could not open the audio" | Allow microphone access for the page in the browser, and check the device chosen in Setup. With computer audio on, share a screen or tab with its share-audio switch turned on. |
+| Sound from the speakers is not transcribed | Set **Setup → Audio source** to **Microphone and computer audio**. See [Computer audio](#computer-audio). |
 | Vocabulary is empty with Supabase configured | Check `SUPABASE_URL` and `SUPABASE_KEY`, that the key may read the table, and that rows exist for `GLOSSARY_SCOPE`. Restart the server after editing `.env`. |
 | A change to `.env` or `app.py` has no effect | Restart the server. Changes to the page only need a reload. |
 
