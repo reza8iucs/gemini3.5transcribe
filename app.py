@@ -89,7 +89,7 @@ client = (
 
 def build_config(options):
     vocabulary = [v.strip() for v in options.get("vocabulary", []) if v.strip()]
-    language = (options.get("language") or "").strip()
+    languages = [code.strip() for code in options.get("languages") or [] if code.strip()]
     mode = "SMART" if options.get("mode") == "SMART" else None
 
     return types.LiveConnectConfig(
@@ -97,8 +97,8 @@ def build_config(options):
             "TEXT",
         ],
         input_audio_transcription=types.AudioTranscriptionConfig(
-            # An empty list means automatic language detection
-            language_codes=[language] if language else [],
+            # Hints for the expected languages; an empty list means automatic detection
+            language_codes=languages,
             custom_vocabulary=vocabulary[:1000] or None,
             mode=mode,
         ),

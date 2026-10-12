@@ -58,11 +58,11 @@ def test_default_config_detects_language_and_returns_text():
 
 def test_config_uses_setup_options():
     config = studio.build_config(
-        {"vocabulary": [" Thorsten ", "", "thorwebdev"], "language": " fr-FR ", "mode": "SMART"}
+        {"vocabulary": [" Thorsten ", "", "thorwebdev"], "languages": [" fr-CA ", "", "en-US"], "mode": "SMART"}
     )
     transcription = config.input_audio_transcription
     assert transcription.custom_vocabulary == ["Thorsten", "thorwebdev"]
-    assert transcription.language_codes == ["fr-FR"]
+    assert transcription.language_codes == ["fr-CA", "en-US"]
     assert transcription.mode == "SMART"
 
 

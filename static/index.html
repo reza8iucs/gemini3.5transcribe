@@ -121,6 +121,7 @@
     text-transform: none; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere;
   }
   mark { background: #5a4a12; color: #ffe9a8; border-radius: 2px; }
+  .vocab { color: #ffd98a; background: rgba(230, 181, 74, .14); border-bottom: 1px solid rgba(230, 181, 74, .7); border-radius: 3px; padding: 0 .12em; }
   .interim {
     border-left: 2px solid var(--green); padding: 28px 30px 34px;
     background: linear-gradient(90deg, #0a1410, transparent 55%);
@@ -159,7 +160,16 @@
   dialog form { padding: 24px; display: flex; flex-direction: column; gap: 18px; }
   dialog h3 { margin: 0; font-size: 13px; letter-spacing: .28em; }
   dialog label { display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: 10px; letter-spacing: .2em; }
-  dialog textarea, dialog select { background: var(--chip); border: 1px solid var(--line-strong); border-radius: 4px; padding: 10px 12px; color: var(--text); text-transform: none; letter-spacing: .02em; font-size: 13px; }
+  dialog .field { display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: 10px; letter-spacing: .2em; }
+  dialog .field-head { display: flex; justify-content: space-between; gap: 12px; }
+  dialog .field-head code { font: inherit; text-transform: none; letter-spacing: .02em; color: var(--dim); }
+  dialog .hint-row { display: flex; gap: 10px; }
+  dialog .hint-row input { flex: 1; min-width: 0; }
+  dialog .hint-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  dialog .hint-chips button { display: inline-flex; align-items: center; gap: 8px; background: var(--chip); border: 1px solid var(--line-strong); border-radius: 4px; padding: 6px 10px; color: var(--text); font-size: 12px; font-weight: 700; text-transform: none; letter-spacing: .04em; }
+  dialog .hint-chips button:hover { border-color: #6b1a16; color: #ff8d85; }
+  dialog .hint-chips svg { width: 12px; height: 12px; color: var(--muted); }
+  dialog textarea, dialog select, dialog .hint-row input { background: var(--chip); border: 1px solid var(--line-strong); border-radius: 4px; padding: 10px 12px; color: var(--text); text-transform: none; letter-spacing: .02em; font-size: 13px; }
   dialog textarea { min-height: 96px; resize: vertical; }
   dialog small { text-transform: none; letter-spacing: .02em; color: var(--dim); line-height: 1.6; }
   dialog .row { display: flex; justify-content: flex-end; gap: 10px; }
@@ -287,13 +297,19 @@
       <textarea id="vocabInput" placeholder="Thorsten, Schaeff, thorwebdev"></textarea>
       <small>Comma or newline separated names, brands and terms to bias recognition toward.</small>
     </label>
-    <label>Language
-      <select id="language">
-        <option value="">Automatic detection</option>
+    <div class="field">
+      <div class="field-head"><label for="languageInput">Language hints (optional)</label><code>language_codes</code></div>
+      <div class="hint-row">
+        <input id="languageInput" list="languageCodes" placeholder="e.g. de-DE, en-US, es-ES..." autocomplete="off">
+        <button class="btn" type="button" id="addLanguage">+ Add</button>
+      </div>
+      <datalist id="languageCodes">
         <option value="en-US">English (United States)</option>
+        <option value="en-CA">English (Canada)</option>
         <option value="en-GB">English (Great Britain)</option>
         <option value="en-IN">English (India)</option>
-        <option value="fr-FR">French</option>
+        <option value="fr-CA">French (Canada)</option>
+        <option value="fr-FR">French (France)</option>
         <option value="de-DE">German</option>
         <option value="es-US">Spanish (United States)</option>
         <option value="es-419">Spanish (Latin America)</option>
@@ -305,8 +321,10 @@
         <option value="ja-JP">Japanese</option>
         <option value="ko-KR">Korean</option>
         <option value="cmn-Hans-CN">Mandarin Chinese (Simplified)</option>
-      </select>
-    </label>
+      </datalist>
+      <div class="hint-chips" id="languageChips"></div>
+      <small id="languageNote"></small>
+    </div>
     <label>Transcription mode
       <select id="mode">
         <option value="VERBATIM">Verbatim — exactly what was said</option>
@@ -358,8 +376,12 @@ const MERGE_WINDOW_MS = 700;
 const SETTINGS_KEY = 'gemini-live-studio:settings';
 const GLOSSARY_KEY = 'gemini-live-studio:glossary-date';
 
-let settings = { vocabulary: [], language: '', mode: 'VERBATIM', deviceId: '' };
+// Languages the speech is expected to be in; they improve accuracy without ruling others out.
+const DEFAULT_LANGUAGES = ['en-US', 'en-CA', 'fr-CA'];
+let settings = { vocabulary: [], languages: [...DEFAULT_LANGUAGES], mode: 'VERBATIM', deviceId: '' };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch {}
+if (!Array.isArray(settings.languages)) settings.languages = [...DEFAULT_LANGUAGES];
+delete settings.language;
 
 let state = 'idle';
 let segments = [];
@@ -409,9 +431,8 @@ function wordCount(text) {
   return (text.trim().match(/\S+/g) || []).length;
 }
 
-function highlight(el, text, query) {
-  el.textContent = '';
-  if (!query) { el.textContent = text; return; }
+function appendWithSearch(el, text, query) {
+  if (!query) { el.append(text); return; }
   const lower = text.toLowerCase();
   let from = 0, at;
   while ((at = lower.indexOf(query, from)) !== -1) {
@@ -422,6 +443,35 @@ function highlight(el, text, query) {
     from = at + query.length;
   }
   el.append(text.slice(from));
+}
+
+// Matches any custom vocabulary term as a whole word, longest term first.
+let vocabPattern = null;
+function buildVocabPattern() {
+  const terms = settings.vocabulary
+    .map((term) => term.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'));
+  vocabPattern = terms.length
+    ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.join('|')})(?![\\p{L}\\p{N}])`, 'giu')
+    : null;
+}
+
+// Fills el with text, marking custom vocabulary terms and search matches.
+function highlight(el, text, query) {
+  el.textContent = '';
+  let from = 0;
+  for (const match of vocabPattern ? text.matchAll(vocabPattern) : []) {
+    appendWithSearch(el, text.slice(from, match.index), query);
+    const term = document.createElement('span');
+    term.className = 'vocab';
+    term.title = 'Custom vocabulary';
+    appendWithSearch(term, match[0], query);
+    el.append(term);
+    from = match.index + match[0].length;
+  }
+  appendWithSearch(el, text.slice(from), query);
 }
 
 function isPinned(scroll) {
@@ -524,7 +574,7 @@ function render() {
   }
 
   $('interim').hidden = !interim;
-  $('interimText').textContent = interim;
+  highlight($('interimText'), interim, '');
   $('empty').hidden = segments.length > 0 || !!interim;
 
   const words = segments.reduce((n, s) => n + wordCount(s.text), 0);
@@ -636,7 +686,7 @@ function openSocket() {
   socket.onopen = () => socket.send(JSON.stringify({
     type: 'start',
     vocabulary: settings.vocabulary,
-    language: settings.language,
+    languages: settings.languages,
     mode: settings.mode,
     sampleRate: audio.context.sampleRate,
   }));
@@ -715,6 +765,7 @@ async function refreshGlossary() {
       localStorage.setItem(GLOSSARY_KEY, today);
     } catch {}
     renderVocab();
+    render();
   } catch {}
 }
 
@@ -808,6 +859,7 @@ function exportAs(kind) {
 // Setup
 function renderVocab() {
   $('vocabText').textContent = settings.vocabulary.length ? settings.vocabulary.join(', ') : 'None';
+  buildVocabPattern();
 }
 async function loadDevices() {
   try {
@@ -819,9 +871,58 @@ async function loadDevices() {
     if (select.selectedIndex < 0) select.value = '';
   } catch {}
 }
+// Language hints being edited in the Setup dialog; saved to settings on Save.
+let draftLanguages = [];
+
+function normalizeLanguageCode(code) {
+  if (!/^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(code)) return null;
+  return code.split('-').map((part, i) => {
+    if (i === 0) return part.toLowerCase();
+    if (part.length === 2) return part.toUpperCase();
+    if (part.length === 4) return part[0].toUpperCase() + part.slice(1).toLowerCase();
+    return part;
+  }).join('-');
+}
+
+function renderLanguageChips() {
+  const chips = $('languageChips');
+  chips.textContent = '';
+  for (const code of draftLanguages) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.title = `Remove ${code}`;
+    chip.setAttribute('aria-label', `Remove ${code}`);
+    chip.innerHTML = '<span></span><svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5"/></svg>';
+    chip.firstChild.textContent = code;
+    chip.onclick = () => {
+      draftLanguages = draftLanguages.filter((c) => c !== code);
+      renderLanguageChips();
+    };
+    chips.append(chip);
+  }
+  $('languageNote').textContent = draftLanguages.length
+    ? 'The languages you expect to hear. Other languages are still transcribed.'
+    : 'No hints: the language is detected automatically.';
+}
+
+function addLanguages() {
+  const rejected = [];
+  for (const entry of $('languageInput').value.split(/[,\s]+/).filter(Boolean)) {
+    const code = normalizeLanguageCode(entry);
+    if (!code) rejected.push(entry);
+    else if (!draftLanguages.includes(code)) draftLanguages.push(code);
+  }
+  // Anything that is not a language code stays in the box to be corrected.
+  $('languageInput').value = rejected.join(', ');
+  renderLanguageChips();
+  if (rejected.length) $('languageNote').textContent = `Not a language code: ${rejected.join(', ')}. Use codes like en-US or fr-CA.`;
+}
+
 function openSetup() {
   $('vocabInput').value = settings.vocabulary.join(', ');
-  $('language').value = settings.language;
+  draftLanguages = [...settings.languages];
+  $('languageInput').value = '';
+  renderLanguageChips();
   $('mode').value = settings.mode;
   loadDevices();
   $('setup').showModal();
@@ -830,13 +931,22 @@ $('setup').addEventListener('close', () => {
   if ($('setup').returnValue !== 'save') return;
   settings = {
     vocabulary: $('vocabInput').value.split(/[,\n]/).map((v) => v.trim()).filter(Boolean),
-    language: $('language').value,
+    languages: draftLanguages,
     mode: $('mode').value,
     deviceId: $('device').value,
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
   renderVocab();
+  render();
 });
+$('addLanguage').onclick = addLanguages;
+$('languageInput').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  // Enter adds the hint instead of closing the dialog.
+  event.preventDefault();
+  addLanguages();
+});
+$('saveSetup').addEventListener('click', addLanguages);
 
 // Wiring
 $('toggle').onclick = () => (state === 'idle' ? startSession() : stopSession());

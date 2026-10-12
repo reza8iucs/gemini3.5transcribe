@@ -98,10 +98,10 @@ def test_stop_ends_the_audio_stream_to_flush_the_last_transcript(install):
 
 def test_setup_options_are_passed_to_the_session(install):
     fake = install()
-    run_session(options={"vocabulary": ["thorwebdev"], "language": "fr-FR", "mode": "SMART"})
+    run_session(options={"vocabulary": ["thorwebdev"], "languages": ["en-US", "fr-CA"], "mode": "SMART"})
     model, config = next(c for c in fake.connected if c[0] == studio.MODEL)
     assert config.input_audio_transcription.custom_vocabulary == ["thorwebdev"]
-    assert config.input_audio_transcription.language_codes == ["fr-FR"]
+    assert config.input_audio_transcription.language_codes == ["en-US", "fr-CA"]
     assert config.input_audio_transcription.mode == "SMART"
 
 
